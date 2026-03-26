@@ -1,0 +1,38 @@
+# Version control
+.git
+.gitignore
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python cache files
+__pycache__
+*.py[cod]
+*$py.class
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# Docker files
+Dockerfile
+docker-compose.yaml
+.dockerignore
+
+# CI/CD files
+.github/
+
+# Documentation
+README.md
+LICENSE
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files with secrets
+.env
+.env.local
