@@ -28,3 +28,10 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
