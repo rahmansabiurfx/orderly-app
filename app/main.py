@@ -7,7 +7,6 @@ import os
 import socket
 from datetime import datetime, timezone
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 # ──────────────────────────────────────────────
@@ -112,18 +111,3 @@ def info():
         "environment": ENVIRONMENT,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-
-# ──────────────────────────────────────────────
-# Startup Event
-# ──────────────────────────────────────────────
-
-# @app.on_event("startup")
-# def startup():
-#     """
-#     Log application startup info.
-#     """
-#     print(f"{'='}*50")
-#     print(f"  {APP_NAME} v{APP_VERSION}")
-#     print(f"  Environment: {ENVIRONMENT}")
-#     print(f"  Hostname: {socket.gethostname()}")
-#     print(f"{'='*50}")
