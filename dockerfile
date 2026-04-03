@@ -16,7 +16,7 @@ RUN python3 -m pytest app/tests/ -v --tb=short
 # ════════════════════════════════════════════════════════════════
 FROM python:3.13-slim AS production
 LABEL maintainer="Orderly Portfolio Project"
-LABEL desscription="FastAPI application for CI/CD pipeline demonstration"
+LABEL description="FastAPI application for CI/CD pipeline demonstration"
 RUN useradd -r -s /bin/false appuser
 WORKDIR /app
 COPY --from=builder /root/.local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
