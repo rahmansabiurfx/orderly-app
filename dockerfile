@@ -19,7 +19,7 @@ WORKDIR /app
 COPY --from=builder /root/.local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /root/.local/bin /usr/local/bin
 COPY --from=builder /app/app ./app/
-USER nobody
+USER 65534
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=30s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
