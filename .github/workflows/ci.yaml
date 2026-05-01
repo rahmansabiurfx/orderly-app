@@ -115,6 +115,7 @@ jobs:
           IMAGE_TAG: ${{ steps.set-tag.outputs.IMAGE_TAG }}
         run: |
           docker build \
+            --platform linux/amd64 \
             -t ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG} \
             -t ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest \
             .
