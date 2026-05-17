@@ -53,10 +53,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r app/requirements.txt
 
-      - name: Lint with flake8
+      - name: Lint and format check with Ruff
         run: |
-          flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 app/ --count --max-line-length=120 --statistics
+          ruff check app/
+          ruff format --check app/
 
       - name: Run tests
         run: |
