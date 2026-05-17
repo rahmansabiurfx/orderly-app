@@ -1,15 +1,5 @@
-# ════════════════════════════════════════════════════════════════
-# CI Pipeline — orderly-app
-#
-# Trigger: push to main, pull requests to main
-# Flow: Test → Build & Scan → Push to ECR → Update GitOps Repo
-# ════════════════════════════════════════════════════════════════
+name: CI/CD Pipeline
 
-name: CI Pipeline
-
-# ──────────────────────────────────────────────
-# TRIGGERS
-# ──────────────────────────────────────────────
 on:
   push:
     branches: [main]
@@ -25,26 +15,27 @@ on:
       - "infrastructure/**"
       - "LICENSE"
 
+concurrency:
+  group: orderly-app-${{ github.ref }}
+  cancel-in-progress: true
 
-# ──────────────────────────────────────────────
-# ENVIRONMENT VARIABLES
-# ──────────────────────────────────────────────
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: orderly-app
 
+permissions:
+  contents: read
+  id-token: write
 
-# ══════════════════════════════════════════════
-# JOBS
-# ══════════════════════════════════════════════
 jobs:
 
-  # ────────────────────────────────────────────
-  # JOB 1: TEST
-  # ────────────────────────────────────────────
+  # ─────────────────────────────────────────────
+  # JOB 1: TEST & LINT
+  # ─────────────────────────────────────────────
   test:
-    name: "Test & Lint"
+    name: Test & Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -61,42 +52,36 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r app/requirements.txt
-          pip install flake8
 
       - name: Lint with flake8
         run: |
           flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 app/ --count --exit-zero --max-line-length=120 --statistics
+          flake8 app/ --count --max-line-length=120 --statistics
 
-      - name: Run tests with pytest
+      - name: Run tests
         run: |
           python -m pytest app/tests/ -v --tb=short
 
 
-  # ────────────────────────────────────────────
-  # JOB 2: BUILD, SCAN, AND PUSH
-  # ────────────────────────────────────────────
-  build-scan-push:
-    name: "Build, Scan & Push"
+  # ─────────────────────────────────────────────
+  # JOB 2: BUILD, SCAN & PUSH
+  # ─────────────────────────────────────────────
+  build-and-push:
+    name: Build, Scan & Push
     runs-on: ubuntu-latest
-
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 20
 
     needs: test
 
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
     outputs:
-      image_tag: ${{ steps.set-tag.outputs.IMAGE_TAG }}
+      image_tag: ${{ steps.meta.outputs.tag }}
+      image_uri: ${{ steps.meta.outputs.uri }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set image tag
-        id: set-tag
-        run: |
-          IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "Image will be tagged as: ${IMAGE_TAG}"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -109,78 +94,157 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Set image metadata
+        id: meta
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+
+          echo "tag=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "uri=${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
       - name: Build Docker image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.set-tag.outputs.IMAGE_TAG }}
         run: |
           docker build \
             --platform linux/amd64 \
             --provenance=false \
             --sbom=false \
-            -t ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG} \
-            -t ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest \
+            -t ${{ steps.meta.outputs.uri }} \
             .
-          docker images ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG} --format "{{.Size}}"
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.IMAGE_TAG }}"
-          format: "table"
+          image-ref: ${{ steps.meta.outputs.uri }}
+          format: table
           exit-code: "1"
+          severity: CRITICAL,HIGH
           ignore-unfixed: true
-          severity: "CRITICAL"
-          timeout: 5m0s
+          timeout: 5m
 
       - name: Push image to ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.set-tag.outputs.IMAGE_TAG }}
         run: |
-          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
-          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+          docker push ${{ steps.meta.outputs.uri }}
 
 
-  # ────────────────────────────────────────────
-  # JOB 3: UPDATE GITOPS REPOSITORY
-  # ────────────────────────────────────────────
-  update-gitops:
-    name: "Update GitOps Repo"
+  # ─────────────────────────────────────────────
+  # JOB 3: DEPLOY TO DEV (automatic)
+  # ─────────────────────────────────────────────
+  deploy-dev:
+    name: Deploy → Dev
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-and-push
 
-    needs: build-scan-push
+    environment: dev
 
     steps:
       - name: Checkout GitOps repository
         uses: actions/checkout@v4
         with:
           repository: rahmansabiurfx/orderly-app-gitops
-          token: ${{ secrets.PAT_TOKEN }}
-          ref: main
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
 
-      - name: Update image tag
+      - name: Update Dev image tag
         run: |
-          NEW_TAG="${{ needs.build-scan-push.outputs.image_tag }}"
-          echo "Updating image tag to: ${NEW_TAG}"
-          sed -i "s|  tag: \".*\"|  tag: \"${NEW_TAG}\"|" helm-chart/values.yaml
-          cat helm-chart/values.yaml
+          cd gitops
 
-      - name: Commit and push
-        run: |
-          git config user.name "GitHub Actions Bot"
+          TAG="${{ needs.build-and-push.outputs.image_tag }}"
+
+          sed -i "s/^  tag: .*/  tag: \"${TAG}\"/" helm-chart/values-dev.yaml
+
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add helm-chart/values.yaml
+
+          git add helm-chart/values-dev.yaml
 
           if git diff --staged --quiet; then
-            echo "No changes to commit — image tag is already up to date"
+            echo "No changes to commit"
           else
-            git commit -m "Update orderly-app image tag to ${{ needs.build-scan-push.outputs.image_tag }}
+            git commit -m "deploy(dev): update image tag to ${TAG}"
+            git push
+          fi
 
-          Triggered by: ${{ github.repository }}@${{ github.sha }}
-          Workflow: ${{ github.workflow }} #${{ github.run_number }}"
 
+  # ─────────────────────────────────────────────
+  # JOB 4: DEPLOY TO STAGING (requires approval)
+  # ─────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy → Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    needs: [deploy-dev, build-and-push]
+
+    environment: staging
+
+    steps:
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: rahmansabiurfx/orderly-app-gitops
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+
+      - name: Update Staging image tag
+        run: |
+          cd gitops
+
+          TAG="${{ needs.build-and-push.outputs.image_tag }}"
+
+          sed -i "s/^  tag: .*/  tag: \"${TAG}\"/" helm-chart/values-staging.yaml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add helm-chart/values-staging.yaml
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "deploy(staging): update image tag to ${TAG}"
+            git push
+          fi
+
+
+  # ─────────────────────────────────────────────
+  # JOB 5: DEPLOY TO PROD (requires approval)
+  # ─────────────────────────────────────────────
+  deploy-prod:
+    name: Deploy → Prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    needs: [deploy-staging, build-and-push]
+
+    environment: prod
+
+    steps:
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: rahmansabiurfx/orderly-app-gitops
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+
+      - name: Update Prod image tag
+        run: |
+          cd gitops
+
+          TAG="${{ needs.build-and-push.outputs.image_tag }}"
+
+          sed -i "s/^  tag: .*/  tag: \"${TAG}\"/" helm-chart/values-prod.yaml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add helm-chart/values-prod.yaml
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "deploy(prod): update image tag to ${TAG}"
             git push
           fi
