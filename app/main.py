@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 # ──────────────────────────────────────────────
 
 APP_NAME = os.getenv("APP_NAME", "orderly-app")
-APP_VERSION = os.getenv("APP_VERSION", "0.3.0")
+APP_VERSION = os.getenv("APP_VERSION", "0.4.0")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
 
 @asynccontextmanager
