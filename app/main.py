@@ -36,7 +36,6 @@ async def lifespan(app: FastAPI):
 # Creating FastAPI Application Instance
 # ──────────────────────────────────────────────
 
-#test comment 1
 
 app = FastAPI(
     title=APP_NAME,
